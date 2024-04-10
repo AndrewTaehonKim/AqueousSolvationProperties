@@ -19,7 +19,13 @@ def molToXYZ(mol, save=False):
     conformer = mol.GetConformer()
     num_atoms = mol.GetNumAtoms()
     # Create a temporary xyz file
-    xyz_file = 
+    with open('xyz/temp.xyz', 'w') as file:
+        # write the number of atoms
+        file.write(str(num_atoms) + '\n')
+        file.write('\n')
+        for symbol, pos in zip([atom.GetSymbol() for atom in mol.GetAtoms()], [conformer.GetAtomPosition(i) for i in range(num_atoms)]):
+            file.write(f"{symbol} \t {str(pos.x)} \t {str(pos.y)} \t {str(pos.z)}\n")
+        file.close()
     # initialize matrix to store xyz coordinates
     xyz_numpy_array_in_angstroms = np.zeros((num_atoms, 3))
     # set the atom positions in above array
