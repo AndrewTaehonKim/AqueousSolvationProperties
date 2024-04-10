@@ -1,4 +1,8 @@
 from src.methods import *
 
-smile_test = 'C(=O)=O'
-aqueousPhaseStructureLowestEnergy(smile_test)
+CO2 = 'C(=O)=O'
+H2O = 'O'
+
+CO2 = aqueousPhaseStructureLowestEnergy(CO2)
+H2O =aqueousPhaseStructureLowestEnergy(H2O)
+print(CO2)
