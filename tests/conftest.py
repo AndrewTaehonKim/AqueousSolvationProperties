@@ -1,4 +1,5 @@
 import pytest
+# Contains pytest fixtures (Andrew)
 
 @pytest.fixture
 # holds the smiles to be tested
