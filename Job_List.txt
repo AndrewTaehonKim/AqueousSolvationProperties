@@ -26,6 +26,7 @@ VERY OPTIONAL: Code for converting list of xyz steps into a gif or video for deb
 
 Code for Robust Reference States ( )
 Code for Formation Energy (Andrew  & )
+    - check if the math/chemistry is correct
 
 Whitepaper ( )
 Code for Bonus Question ( )

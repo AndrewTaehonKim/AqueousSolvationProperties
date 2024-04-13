@@ -147,19 +147,12 @@ def makeReferenceFiles():
         pickle.dump(energy_dict, file)
 
 # Gets the formation energies by building SMILES molecule based on references
-def getFormationEnergies(atomic_symbols, E_formed):
+def getFormationEnergies(atomic_symbols, E_products):
     # get the total number of atoms
-    is_odd = False
     count_dictionary = {}
     for symbol in set(atomic_symbols):
         count = np.sum(np.char.count(atomic_symbols, symbol))
         count_dictionary[symbol] = count
-    # if any count is odd, multiply by 2 to make it all even
-    if any(value % 2 != 0 for value in count_dictionary.values()):
-        is_odd = True
-        count_dictionary = {key: value * 2 for key, value in count_dictionary.items()}
-    # calculate energy used to break bonds
-    E_broken = 0
     # Specify the filename
     filename = 'references/reference_energies.pkl'
     # Check if the file exists
@@ -167,9 +160,13 @@ def getFormationEnergies(atomic_symbols, E_formed):
         raise FileNotFoundError(f"The file '{filename}' does not exist.")
     with open(filename, 'rb') as f:
         reference_energies = pickle.load(f)
-    for key, value in count_dictionary.items(): # BROKEN for now
-        E_broken += value/2 * reference_energies[key]*2 if is_odd is True else value/2 * reference_energies[key]
-    return E_broken - E_formed
+    # calculate energy used to break bonds
+    E_reactants = 0
+    # EXAMPLE: H2O is 2H + 1O -> E_H2 + 1/2 E_O2
+    #          C2H6 is 2C + 6H -> E_C2 + 3E_H2
+    for key, atom_count in count_dictionary.items():
+        E_reactants += atom_count/2 * reference_energies[key]
+    return E_products - E_reactants
 
 def getPerturbedPositions(atomic_positions, perturb_magnitude):
     perturbation_matrix = np.zeros(atomic_positions.shape)
