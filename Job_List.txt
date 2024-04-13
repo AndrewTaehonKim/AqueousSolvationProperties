@@ -28,6 +28,8 @@ Code for Robust Reference States ( )
 Code for Formation Energy (Andrew  & )
     - check if the math/chemistry is correct
 
+Code for RDK Fingerprint ()
+
 Whitepaper ( )
 Code for Bonus Question ( )
 
