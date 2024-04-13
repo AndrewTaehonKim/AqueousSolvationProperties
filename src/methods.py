@@ -32,7 +32,7 @@ def smilesToMol(smiles, draw_img=False):
     AllChem.MMFFOptimizeMolecule(mol)
     return mol
 
-# Returns the atomic numbers and positions for input into calculator
+# Returns the atomic numbers and positions for input into calculator (Andrew)
 def rdkitmolToXTBInputs(mol, save=False):
     # get positions and number of atoms in the molecule
     conformer = mol.GetConformer() 
@@ -47,7 +47,7 @@ def aqueousPhaseStructureLowestEnergy(smiles):
     atomic_numbers, atomic_symbols, atomic_positions = rdkitmolToXTBInputs(smilesToMol(smiles))
     return atomic_symbols, atomic_positions
 
-# Runs the SCF Calculation and gets very expensive as the number of atoms increases... need to call this as little as possible
+# Runs the SCF Calculation and gets very expensive as the number of atoms increases... need to call this as little as possible (Andrew & Lareine)
 def getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent, max_SCF_iterations=125, verbose=False): # max SCF based on ORCA
     # initialize Calculator Object to perform calcuations with XTB
     calc = Calculator(Param.GFN2xTB, atomic_numbers, atomic_positions)
@@ -61,7 +61,7 @@ def getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent
     result = calc.singlepoint()
     return result.get_energy()*KCALPERMOL_PER_HARTREE, result.get_gradient()
 
-# Controls how the next XYZ coordinates are determined
+# Controls how the next XYZ coordinates are determined (Andrew & Lareine)
 def updateXYZ(atomic_numbers, atomic_positions, gradient, H, calc_solvent, solvent, method='BFGS'):
     epsilon = 1e-7
     # BFGS Update  # LAREINE please check
@@ -86,14 +86,15 @@ def updateXYZ(atomic_numbers, atomic_positions, gradient, H, calc_solvent, solve
 
 RMS = lambda data: np.sqrt(np.mean(np.square(data)))
 
-def isConverged(xyz_history, energy_history, gradient_history, criteria, TolE=5e-6, TolRMSG=1e-4, TolMaxG=3e-4, TolMaxD=4e-3,TolRMSD=2e-3):
+# Convergence Criteria (Andrew)
+def isConverged(xyz_history, energy_history, gradient_history, criteria, TolE=5e-6, TolRMSG=1e-4, TolMaxG=3e-4, TolMaxD=4e-3,TolRMSD=2e-3): 
     # Convergence Criteria based on ORCA 4.2.1. convergence criteria https://www.afs.enea.it/software/orca/orca_manual_4_2_1.pdf page 19
     match criteria:
         case 'Normal': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) < TolRMSD else False
         case 'Tight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG else False
         case 'VeryTight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG and abs(energy_history[-1]-energy_history[-2]) < TolE and RMS(np.linalg.norm(gradient_history[-1], axis=1)) < TolRMSG else False
         
-# Optimization Method
+# Optimization Method (Andrew)
 def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', identifier='', max_optimzize_iterations=100, calc_solvent=False, solvent=Solvent.h2o, plot=False, verbose=True):
     xyz_history = []
     energy_history = []
@@ -131,10 +132,10 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', 
     return xyz_history[-1], energy_history[-1]
 
 
-# Reference Molecule Properties in Solvent
+# Reference Molecule Properties in Solvent (Andrew)
 get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=False, max_optimzize_iterations=200)
 
-# Run this one time to generate the files necessary to hold the reference data
+# Run this one time to generate the files necessary to hold the reference data (Andrew)
 def makeReferenceFiles():
     reference_smiles_list = np.array(['[H][H]','[C-]#[C+]', 'N#N', 'O=O', 'FF', 'P#P', 'S=S', 'ClCl'])
     reference_symbols_list = np.array(['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl'])
@@ -146,7 +147,7 @@ def makeReferenceFiles():
     with open(f'references/reference_energies.pkl', 'wb') as file:
         pickle.dump(energy_dict, file)
 
-# Gets the formation energies by building SMILES molecule based on references
+# Gets the formation energies by building SMILES molecule based on references (Andrew)
 def getFormationEnergies(atomic_symbols, E_products):
     # get the total number of atoms
     count_dictionary = {}
@@ -168,6 +169,7 @@ def getFormationEnergies(atomic_symbols, E_products):
         E_reactants += atom_count/2 * reference_energies[key]
     return E_products - E_reactants
 
+# Perturbed atomic positions (Andrew)
 def getPerturbedPositions(atomic_positions, perturb_magnitude):
     perturbation_matrix = np.zeros(atomic_positions.shape)
     # Select a random row
@@ -176,7 +178,7 @@ def getPerturbedPositions(atomic_positions, perturb_magnitude):
     perturbation_matrix[random_row, :] += np.random.uniform(-perturb_magnitude, perturb_magnitude, perturbation_matrix.shape[1])
     return perturbation_matrix+atomic_positions
 
-# Final Method
+# Final Method (Andrew)
 def smiles_to_properties(smiles, criteria='Tight', verbose=True, plot=True):
     print("Performing Calculation. Please Wait.")
     # timer
@@ -222,3 +224,5 @@ def smiles_to_properties(smiles, criteria='Tight', verbose=True, plot=True):
     # report time
     end_time = timeit.default_timer()
     print(f"Total Time Taken: {end_time -  start_time: .0f} seconds")
+    
+    return 0

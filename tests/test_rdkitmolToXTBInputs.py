@@ -1,6 +1,6 @@
 from src.methods import smilesToMol, rdkitmolToXTBInputs
 import numpy as np
-
+# (Andrew)
 def test_rdkitmolToXTBInputs(test_smiles_list):
     for test_smiles in test_smiles_list:
         mol = smilesToMol(test_smiles)

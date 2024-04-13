@@ -1,7 +1,7 @@
 from src.methods import getEnergyAndGradient, rdkitmolToXTBInputs, smilesToMol
 from xtb.utils import Solvent
 import numpy as np
-
+# (Andrew)
 def test_getEnergyAndGradient(test_smiles_list):
     for smiles in test_smiles_list:
         atomic_numbers, atomic_symbols, atomic_positions = rdkitmolToXTBInputs(smilesToMol(smiles))

@@ -3,7 +3,7 @@ from xtb.utils import Solvent
 from src.methods import updateXYZ, smilesToMol, rdkitmolToXTBInputs, getEnergyAndGradient
 import random
 import numpy as np
-
+# (Andrew)
 def test_updateXYZ(test_smiles_list):
     test_cases = (random.sample(test_smiles_list[:3], 1)) # test one normal case
     test_cases.append(random.sample(test_smiles_list[3:], 1)[0]) # test one random case
