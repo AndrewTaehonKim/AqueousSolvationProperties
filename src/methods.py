@@ -9,6 +9,7 @@ import numpy as np
 import timeit
 import pickle
 import os
+import random
 
 import matplotlib.pyplot as plt
 
@@ -17,14 +18,15 @@ ANGSTROM_PER_BOHR = constants.physical_constants['Bohr radius'][0] * 1.0e10 # Be
 KCALPERMOL_PER_HARTREE = 627.509
 ### Methods ###
 # Converts the SMILES string into a Mol object (Andrew & Lareine)
-def smilesToMol(smiles):
+def smilesToMol(smiles, draw_img=False):
     # import mol object using rdkit.Chem
     mol = AddHs(MolFromSmiles(smiles))
     if mol is None:
         raise ValueError (f"{smiles} is not a valid SMILES input")
     # Draw for debugging purposes
-    img = Draw.MolToImage(mol)
-    # img.save(f"images/{smiles}.jpg")
+    if draw_img:
+        img = Draw.MolToImage(mol)
+        img.save(f"images/{smiles}.jpg")
     AllChem.EmbedMolecule(mol)
     # basic optimize using MMFF94 force field to get starting structure in Bohr
     AllChem.MMFFOptimizeMolecule(mol)
@@ -84,7 +86,7 @@ def updateXYZ(atomic_numbers, atomic_positions, gradient, H, calc_solvent, solve
 
 RMS = lambda data: np.sqrt(np.mean(np.square(data)))
 
-def isConverged(xyz_history, energy_history, gradient_history, criteria='Tight', TolE=5e-6, TolRMSG=1e-4, TolMaxG=3e-4, TolMaxD=4e-3,TolRMSD=2e-3):
+def isConverged(xyz_history, energy_history, gradient_history, criteria, TolE=5e-6, TolRMSG=1e-4, TolMaxG=3e-4, TolMaxD=4e-3,TolRMSD=2e-3):
     # Convergence Criteria based on ORCA 4.2.1. convergence criteria https://www.afs.enea.it/software/orca/orca_manual_4_2_1.pdf page 19
     match criteria:
         case 'Normal': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) < TolRMSD else False
@@ -92,7 +94,7 @@ def isConverged(xyz_history, energy_history, gradient_history, criteria='Tight',
         case 'VeryTight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG and abs(energy_history[-1]-energy_history[-2]) < TolE and RMS(np.linalg.norm(gradient_history[-1], axis=1)) < TolRMSG else False
         
 # Optimization Method
-def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, max_optimzize_iterations=100, calc_solvent=False, solvent=Solvent.h2o, plot=True, verbose=True):
+def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', identifier='', max_optimzize_iterations=100, calc_solvent=False, solvent=Solvent.h2o, plot=False, verbose=True):
     xyz_history = []
     energy_history = []
     grad_history = []
@@ -108,14 +110,14 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, max_optimzize_iter
         energy_history.append(update_energy)
         grad_history.append(update_gradient)
         # Check Convergence Criteria
-        if iter > 1 and isConverged(xyz_history, energy_history, grad_history):
-            print(f"Finished calculation after {iter} iterations with final energy: {energy_history[-1]}") if verbose is True else ''
+        if iter > 1 and isConverged(xyz_history, energy_history, grad_history, criteria=criteria):
+            print(f"Finished calculation after {iter+1} iterations with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
             break
         if iter == max_optimzize_iterations-1:
-            print(f"Maximum iterations ({iter}) reached for vacuum calculation. Ending with final energy: {energy_history[-1]}") if verbose is True else ''
+            print(f"Maximum iterations ({iter+1}) reached for vacuum calculation. Ending with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
     # end timer
     end_time = timeit.default_timer()
-    print("Total Time: ", end_time-start_time) if verbose is True else ''
+    print(f"Total Time: {end_time-start_time: .0f}s") if verbose is True else ''
     
     # Plotting for Debugging
     if plot:
@@ -124,16 +126,16 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, max_optimzize_iter
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Energy (Hartree)")
         ax.legend()
-        plt.savefig(f"images/energy_convergence-{'solvent' if calc_solvent else 'vacuum'}.jpg")
+        plt.savefig(f"images/energy_convergence-{' '.join(atomic_symbols)}-{identifier}-{'solvent' if calc_solvent else 'vacuum'}.jpg")
         
-    return xyz_history[-1]*ANGSTROM_PER_BOHR, energy_history[-1]
+    return xyz_history[-1], energy_history[-1]
 
 
 # Reference Molecule Properties in Solvent
-get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=True, max_optimzize_iterations=200)
+get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=False, max_optimzize_iterations=200)
 
 # Run this one time to generate the files necessary to hold the reference data
-def make_reference_files():
+def makeReferenceFiles():
     reference_smiles_list = np.array(['[H][H]','[C-]#[C+]', 'N#N', 'O=O', 'FF', 'P#P', 'S=S', 'ClCl'])
     reference_symbols_list = np.array(['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl'])
     energy_dict = {}
@@ -145,7 +147,7 @@ def make_reference_files():
         pickle.dump(energy_dict, file)
 
 # Gets the formation energies by building SMILES molecule based on references
-def get_formation_energies(atomic_symbols, E_formed):
+def getFormationEnergies(atomic_symbols, E_formed):
     # get the total number of atoms
     is_odd = False
     count_dictionary = {}
@@ -169,18 +171,57 @@ def get_formation_energies(atomic_symbols, E_formed):
         E_broken += value/2 * reference_energies[key]*2 if is_odd is True else value/2 * reference_energies[key]
     return E_broken - E_formed
 
-        
+def getPerturbedPositions(atomic_positions, perturb_magnitude):
+    perturbation_matrix = np.zeros(atomic_positions.shape)
+    # Select a random row
+    random_row = np.random.randint(perturbation_matrix.shape[0])
+    # Add a random float to move one atom
+    perturbation_matrix[random_row, :] += np.random.uniform(-perturb_magnitude, perturb_magnitude, perturbation_matrix.shape[1])
+    return perturbation_matrix+atomic_positions
+
 # Final Method
-def smiles_to_properties(smiles):
+def smiles_to_properties(smiles, criteria='Tight', verbose=True, plot=True):
+    print("Performing Calculation. Please Wait.")
+    # timer
+    start_time = timeit.default_timer()
+    # Read SMILES to initialize
     atomic_numbers, atomic_symbols, atomic_positions = rdkitmolToXTBInputs(smilesToMol(smiles))
-    # Run Vacuum calculation
-    xyz, vacuum_energy = geomOpt(atomic_numbers, atomic_symbols, atomic_positions, calc_solvent=False)
-    # Run Solvent calculation
-    xyz, solvent_energy = geomOpt(atomic_numbers, atomic_symbols, atomic_positions, calc_solvent=True)
-    solvation_energy = (solvent_energy - vacuum_energy)
-    print("xyz (angstrom)")
-    print(xyz)
-    print(f"Solvation Energy (kcal/mol): {solvation_energy: .3}")
-    # Get Formation Energies using information in folder
-    formation_energy = get_formation_energies(atomic_symbols, solvent_energy)
-    print(f"Energy of Formation (kcal/mol): {formation_energy: .3}")
+    # Add perturbation and run optimization multiple times
+    perturb_count = 5
+    perturb_magnitude = .5 # bohrs
+    # store results
+    vacuum_xyz_history = []
+    vacuum_energy_history =[]
+    solvent_xyz_history = []
+    solvent_energy_history =[]
+    solvation_energy_history = []
+    for i in range(perturb_count):
+        # Run Vacuum calculation
+        vacuum_xyz, vacuum_energy = geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria=criteria, identifier=str(i), calc_solvent=False, plot=plot, verbose=verbose)
+        # Run Solvent calculation
+        solvent_xyz, solvent_energy = geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria=criteria, identifier=str(i), calc_solvent=True, plot=plot, verbose=verbose)
+        # Get solvent Energy
+        solvation_energy = (solvent_energy - vacuum_energy)
+        # Perturb positions of vacuum
+        atomic_positions = getPerturbedPositions(vacuum_xyz, perturb_magnitude)
+        # Add to history
+        vacuum_xyz_history.append(vacuum_xyz)
+        vacuum_energy_history.append(vacuum_energy)
+        solvent_xyz_history.append(solvent_xyz)
+        solvent_energy_history.append(solvent_energy)
+        solvation_energy_history.append(solvation_energy)
+    print("solvent optimized xyz coordinates (angstrom)")
+    print(random.sample(solvent_xyz_history, 1)[0]*ANGSTROM_PER_BOHR)
+    print(f"Raw Vacuum Energy (kcal/mol): {np.mean(vacuum_energy_history): .1f} +- {np.std(vacuum_energy_history): .1f} | Raw Solvent Energy (kcal/mol): {np.mean(solvent_energy) : .1f} +- {np.std(solvent_energy_history): .1f}")
+    # formation energies
+    formation_energy_history = []
+    for solvent_energy in solvent_energy_history:
+        formation_energy_history.append(getFormationEnergies(atomic_symbols, solvent_energy))
+    print(f"Energy of Formation (kcal/mol): {np.mean(formation_energy_history): .1f}  +- {np.std(formation_energy_history): .1f}")
+    
+    # solvation energy
+    print(f"Solvation Energy (kcal/mol): {np.mean(solvation_energy_history): .3f} +- {np.std(solvation_energy_history): .3f}")
+    
+    # report time
+    end_time = timeit.default_timer()
+    print(f"Total Time Taken: {end_time -  start_time: .0f} seconds")

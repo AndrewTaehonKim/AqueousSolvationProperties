@@ -5,7 +5,7 @@ BENZENE = 'C1=CC=CC=C1'
 ETHANE = 'CC'
 
 
-# H2O =smiles_to_properties(H2O)
+H2O =smiles_to_properties(H2O)
 # ETHANE =smiles_to_properties(ETHANE)
 # CO2 =smiles_to_properties(CO2)
 # BENZENE = smiles_to_properties(BENZENE)

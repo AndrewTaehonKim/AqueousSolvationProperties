@@ -1,0 +1,38 @@
+Below are the lists of tasks that have been completed and need to be completed. 
+Please feel free to associate your name to what you have done.
+Please feel free to break these tasks into subtasks (for credidation purposes)
+
+___________ Completed _______________
+Code for Reading SMILES (Lareine & Andrew)
+Code for Energy Optimization (Andrew)
+Code for Solvation Energy (Andrew)
+
+____________ To Be Done ____________
+
+Code for Solvation Optimization (Andrew)
+Code for Geometry Optimization (Andrew & Lareine)
+    - Needs to be faster and more robust with random SMILES
+    - Adjust learning rate to be flexible for faster convergence with fewer SCF cycles per iteration
+
+Code for Energy STD (Andrew &)
+Code for Solvation Energy STD (Andrew &)
+    - Robust Perturbation Method (Andrew &) that is not so sensitive to perturbation magnitude
+
+Code for Tests with known and unknown test cases (Andrew & Lareine & Ubaidullah)
+Test cases [H20 (simple), SO2 (polar sulfur), Ethane (Stevenson example), chloro-Benzene (resonance chlorine), H2PO4 (acid), 1,3,5-trifluoro-Benzene] vs. better DFT [ORCA] (Ubaidullah) # please feel free to change test cases based on what you think captures what could happen to molecules in water
+
+Code for converting to make 3D image of optimized structure for whitepaper and for debugging purposes ( )
+VERY OPTIONAL: Code for converting list of xyz steps into a gif or video for debugging purposes ( )
+
+Code for Robust Reference States ( )
+Code for Formation Energy (Andrew  & )
+
+Whitepaper ( )
+Code for Bonus Question ( )
+
+Code for Pretty Output ( )
+Sigfig Check ( )
+Prettify the Code ( )
+Add a bunch of comments (Everyone)
+
+_________ move above when completed _________
