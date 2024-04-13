@@ -147,6 +147,7 @@ def make_reference_files():
 # Gets the formation energies by building SMILES molecule based on references
 def get_formation_energies(atomic_symbols, E_formed):
     # get the total number of atoms
+    is_odd = False
     count_dictionary = {}
     for symbol in set(atomic_symbols):
         count = np.sum(np.char.count(atomic_symbols, symbol))

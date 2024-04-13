@@ -1,5 +1,4 @@
 from src.methods import *
-import random 
 CO2 = 'C(=O)=O'
 H2O = 'O'
 BENZENE = 'C1=CC=CC=C1'
@@ -12,4 +11,4 @@ ETHANE = 'CC'
 # BENZENE = smiles_to_properties(BENZENE)
 
 # make_reference_files()
-smiles_to_properties('COONP')
+# smiles_to_properties('COONP')
