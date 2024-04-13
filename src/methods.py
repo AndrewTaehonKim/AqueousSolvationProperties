@@ -24,7 +24,7 @@ def smilesToMol(smiles):
         raise ValueError (f"{smiles} is not a valid SMILES input")
     # Draw for debugging purposes
     img = Draw.MolToImage(mol)
-    img.save(f"images/{smiles}.jpg")
+    # img.save(f"images/{smiles}.jpg")
     AllChem.EmbedMolecule(mol)
     # basic optimize using MMFF94 force field to get starting structure in Bohr
     AllChem.MMFFOptimizeMolecule(mol)
@@ -40,6 +40,10 @@ def rdkitmolToXTBInputs(mol, save=False):
     atomic_symbols = np.array([atom.GetSymbol() for atom in mol.GetAtoms()])
     atomic_positions = np.array([conformer.GetAtomPosition(i) for i in range(num_atoms)]) / ANGSTROM_PER_BOHR # Convert force field optimized xyz from angstrom to bohr
     return atomic_numbers, atomic_symbols, atomic_positions
+
+def aqueousPhaseStructureLowestEnergy(smiles):
+    atomic_numbers, atomic_symbols, atomic_positions = rdkitmolToXTBInputs(smilesToMol(smiles))
+    return atomic_symbols, atomic_positions
 
 # Runs the SCF Calculation and gets very expensive as the number of atoms increases... need to call this as little as possible
 def getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent, max_SCF_iterations=125, verbose=False): # max SCF based on ORCA
