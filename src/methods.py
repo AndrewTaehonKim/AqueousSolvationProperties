@@ -62,15 +62,22 @@ def getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent
     return result.get_energy()*KCALPERMOL_PER_HARTREE, result.get_gradient()
 
 # Controls how the next XYZ coordinates are determined (Andrew & Lareine)
-def updateXYZ(atomic_numbers, atomic_positions, gradient, H, calc_solvent, solvent, method='BFGS'):
+def updateXYZ(atomic_numbers,
+    atomic_positions,
+    gradient,
+    H,
+    calc_solvent,
+    solvent,
+    method='BFGS',
+    scalar=0.5):
     epsilon = 1e-7
     # BFGS Update  # LAREINE please check
     if method == 'BFGS':
         H_length = len(atomic_positions.reshape(-1, 1))
         I = np.eye(H_length)
         search = -np.dot(H, gradient.reshape(-1, 1)) # moves based on this
-        learning = .5 # this step size can cause problems ... LAREINE, please take a look and try to improve
-        new_atomic_positions = atomic_positions.reshape(-1, 1) + learning*search
+        # this step size can cause problems ... LAREINE, please take a look and try to improve
+        new_atomic_positions = atomic_positions.reshape(-1, 1) + scalar*search
         new_atomic_positions = new_atomic_positions.reshape(len(atomic_positions), 3)
         energy, new_gradient = getEnergyAndGradient(atomic_numbers, new_atomic_positions, calc_solvent, solvent)
         delta_x = (new_atomic_positions - atomic_positions).reshape(-1, 1)
@@ -95,7 +102,18 @@ def isConverged(xyz_history, energy_history, gradient_history, criteria, TolE=5e
         case 'VeryTight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG and abs(energy_history[-1]-energy_history[-2]) < TolE and RMS(np.linalg.norm(gradient_history[-1], axis=1)) < TolRMSG else False
         
 # Optimization Method (Andrew)
-def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', identifier='', max_optimzize_iterations=100, calc_solvent=False, solvent=Solvent.h2o, plot=False, verbose=True):
+def geomOpt(atomic_numbers,
+    atomic_symbols,
+    atomic_positions,
+    criteria='Tight',
+    identifier='',
+    max_optimize_iterations=100,
+    calc_solvent=False,
+    solvent=Solvent.h2o,
+    plot=False,
+    verbose=True,
+    scalar=0.87,
+    learning=0.97):
     xyz_history = []
     energy_history = []
     grad_history = []
@@ -105,8 +123,18 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', 
     # Perform Optimization
     update_energy, update_gradient = getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent)
     H = np.eye(len(atomic_positions.reshape(-1, 1)))
-    for iter in range(max_optimzize_iterations):
-        atomic_positions, update_energy, update_gradient, H, = updateXYZ(atomic_numbers, atomic_positions, update_gradient, H, calc_solvent=False, solvent=None) if not calc_solvent else updateXYZ(atomic_numbers, atomic_positions, update_gradient, H, calc_solvent=True, solvent=solvent)
+    for iter in range(max_optimize_iterations):
+        if not calc_solvent:
+            solvent = None
+        (atomic_positions,
+            update_energy,
+            update_gradient,
+            H) = updateXYZ(atomic_numbers,
+            atomic_positions,
+            update_gradient,
+            H,
+            calc_solvent=calc_solvent,
+            solvent=solvent)
         xyz_history.append(atomic_positions)
         energy_history.append(update_energy)
         grad_history.append(update_gradient)
@@ -114,8 +142,9 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', 
         if iter > 1 and isConverged(xyz_history, energy_history, grad_history, criteria=criteria):
             print(f"Finished calculation after {iter+1} iterations with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
             break
-        if iter == max_optimzize_iterations-1:
+        if iter == max_optimize_iterations-1:
             print(f"Maximum iterations ({iter+1}) reached for vacuum calculation. Ending with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
+        scalar *= learning
     # end timer
     end_time = timeit.default_timer()
     print(f"Total Time: {end_time-start_time: .0f}s") if verbose is True else ''
@@ -127,13 +156,13 @@ def geomOpt(atomic_numbers, atomic_symbols, atomic_positions, criteria='Tight', 
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Energy (Hartree)")
         ax.legend()
-        plt.savefig(f"images/energy_convergence-{' '.join(atomic_symbols)}-{identifier}-{'solvent' if calc_solvent else 'vacuum'}.jpg")
+        # plt.savefig(f"images/energy_convergence-{' '.join(atomic_symbols)}-{identifier}-{'solvent' if calc_solvent else 'vacuum'}.jpg")
         
     return xyz_history[-1], energy_history[-1]
 
 
 # Reference Molecule Properties in Solvent (Andrew)
-get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=False, max_optimzize_iterations=200)
+get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=False, max_optimize_iterations=200)
 
 # Run this one time to generate the files necessary to hold the reference data (Andrew)
 def makeReferenceFiles():
