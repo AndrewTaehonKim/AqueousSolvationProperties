@@ -48,118 +48,150 @@ def aqueousPhaseStructureLowestEnergy(smiles):
     return atomic_symbols, atomic_positions
 
 # Runs the SCF Calculation and gets very expensive as the number of atoms increases... need to call this as little as possible (Andrew & Lareine)
-def getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent, max_SCF_iterations=125, verbose=False): # max SCF based on ORCA
+def getEnergyAndGradient(atomic_numbers,
+    atomic_positions,
+    calc_solvent,
+    solvent,
+    max_SCF_iterations=125,
+    verbose=False): # max SCF based on ORCA
     # initialize Calculator Object to perform calcuations with XTB
     calc = Calculator(Param.GFN2xTB, atomic_numbers, atomic_positions)
     # Set Calculator Properties
-    calc.set_verbosity(VERBOSITY_MINIMAL) if verbose else calc.set_verbosity(VERBOSITY_MUTED)
-    calc.set_max_iterations(max_SCF_iterations) # max iterations for each SCF energy calculation
+    calc.set_verbosity(VERBOSITY_MINIMAL if verbose else VERBOSITY_MUTED)
+    # max iterations for each SCF energy calculation
+    calc.set_max_iterations(max_SCF_iterations)
     # if solvent is required, run optimize with solvent with the starting position as the optimal version of the vacuum optimization
-    if calc_solvent:
-        calc.set_solvent(Solvent.h2o)
+    calc.set_solvent(solvent)
     # perform SCF calculation
     result = calc.singlepoint()
-    return result.get_energy()*KCALPERMOL_PER_HARTREE, result.get_gradient()
+    return result.get_energy() * KCALPERMOL_PER_HARTREE, result.get_gradient()
 
 # Controls how the next XYZ coordinates are determined (Andrew & Lareine)
 def updateXYZ(atomic_numbers,
     atomic_positions,
     gradient,
+    shape,
     H,
+    I,
     calc_solvent,
     solvent,
     method='BFGS',
-    scalar=0.5):
-    epsilon = 1e-7
+    scalar=0.4):
     # BFGS Update  # LAREINE please check
     if method == 'BFGS':
-        H_length = len(atomic_positions.reshape(-1, 1))
-        I = np.eye(H_length)
-        search = -np.dot(H, gradient.reshape(-1, 1)) # moves based on this
         # this step size can cause problems ... LAREINE, please take a look and try to improve
-        new_atomic_positions = atomic_positions.reshape(-1, 1) + scalar*search
-        new_atomic_positions = new_atomic_positions.reshape(len(atomic_positions), 3)
-        energy, new_gradient = getEnergyAndGradient(atomic_numbers, new_atomic_positions, calc_solvent, solvent)
-        delta_x = (new_atomic_positions - atomic_positions).reshape(-1, 1)
-        delta_grad = (new_gradient - gradient).reshape(-1,1)
-        rho = 1.0 / (delta_grad.T@delta_x + epsilon)[0,0] # added epsilon to prevent division by zero
-        H = (I-rho*np.outer(delta_x, delta_grad))@H@(I-rho*np.outer(delta_grad, delta_x)) + rho*np.outer(delta_x, delta_x)
-    # basic gradient update as comparison and safer default
+        delta_x = -scalar * np.dot(H, gradient.reshape(-1, 1))
+        atomic_positions = (atomic_positions.reshape(-1, 1)
+            + delta_x).reshape(*shape)
+        energy, new_gradient = getEnergyAndGradient(atomic_numbers,
+            atomic_positions,
+            calc_solvent,
+            solvent)
+        delta_grad = (new_gradient - gradient).reshape(-1, 1)
+        dot = (delta_x * delta_grad).sum()
+        J = I - np.outer(delta_x, delta_grad) / dot
+        H = J @ H @ J.T + np.outer(delta_x, delta_x) / dot
     else:
-        new_atomic_positions = atomic_positions
-        energy, new_gradient = getEnergyAndGradient(atomic_numbers, new_atomic_positions, calc_solvent, solvent)
-        new_atomic_positions -= 0.3 * new_gradient
-    return new_atomic_positions, energy, new_gradient, H
-
-RMS = lambda data: np.sqrt(np.mean(np.square(data)))
+        # basic gradient update as comparison and safer default
+        energy, new_gradient = getEnergyAndGradient(atomic_numbers,
+            atomic_positions,
+            calc_solvent,
+            solvent)
+        atomic_positions -= 0.3 * new_gradient
+    return atomic_positions, energy, new_gradient, H
 
 # Convergence Criteria (Andrew)
-def isConverged(xyz_history, energy_history, gradient_history, criteria, TolE=5e-6, TolRMSG=1e-4, TolMaxG=3e-4, TolMaxD=4e-3,TolRMSD=2e-3): 
+def isConverged(history,
+    criteria,
+    TolE=5e-6,
+    TolRMSG_square = 1e-8, # TolRMSG=1e-4
+    TolMaxG_square=9e-8, # TolMaxG=3e-4,
+    TolMaxD=4e-3,
+    TolRMSD_square=4e-6): # TolRMSD=2e-3
     # Convergence Criteria based on ORCA 4.2.1. convergence criteria https://www.afs.enea.it/software/orca/orca_manual_4_2_1.pdf page 19
-    match criteria:
-        case 'Normal': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) < TolRMSD else False
-        case 'Tight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG else False
-        case 'VeryTight': return True if np.allclose(xyz_history[-1], xyz_history[-2], TolMaxD) and RMS(np.linalg.norm(xyz_history[-1]-xyz_history[-2])) and max(np.linalg.norm(gradient_history[-1],axis=1)) < TolMaxG and abs(energy_history[-1]-energy_history[-2]) < TolE and RMS(np.linalg.norm(gradient_history[-1], axis=1)) < TolRMSG else False
+    previous, current = history['xyz'][-2:]
+    allclose = np.allclose(previous, current, TolMaxD)
+    mean_square = np.sqrt(np.mean(np.sum((previous - current) ** 2)))
+    if criteria == 'NORMALOPT':
+        return allclose and mean_square < TolRMSD_square
+    sum_square = [sum(_**2) for _ in history['grad'][-1]]
+    return all([allclose,
+        mean_square, # < TolRMS...
+        max(sum_square) < TolMaxG_square]) and (criteria == 'TIGHTOPT'
+            or all([criteria == 'VERYTIGHTOPT',
+                np.isclose(history['energy'][-1],
+                    history['energy'][-2],
+                    atol=TolE),
+                np.mean(sum_square) < TolRMSG_square]))
         
 # Optimization Method (Andrew)
 def geomOpt(atomic_numbers,
     atomic_symbols,
     atomic_positions,
-    criteria='Tight',
+    criteria='TIGHTOPT',
     identifier='',
     max_optimize_iterations=100,
     calc_solvent=False,
     solvent=Solvent.h2o,
     plot=False,
     verbose=True,
-    scalar=0.87,
+    scalar=0.5,
     learning=0.97):
-    xyz_history = []
-    energy_history = []
-    grad_history = []
+    history_keys = ['xyz', 'energy', 'grad']
+    history = {history_key: [] for history_key in history_keys}
     # start timer
     start_time = timeit.default_timer()
     # print("starting position:", atomic_positions)
     # Perform Optimization
-    update_energy, update_gradient = getEnergyAndGradient(atomic_numbers, atomic_positions, calc_solvent, solvent)
-    H = np.eye(len(atomic_positions.reshape(-1, 1)))
-    for iter in range(max_optimize_iterations):
-        if not calc_solvent:
-            solvent = None
+    update_energy, update_gradient = getEnergyAndGradient(atomic_numbers,
+        atomic_positions,
+        calc_solvent,
+        solvent)
+    n, m = atomic_positions.shape
+    H = np.eye(n * m)
+    I = H[:]
+    if not calc_solvent:
+        solvent = None
+    for i in range(1, max_optimize_iterations + 1):
         (atomic_positions,
             update_energy,
             update_gradient,
             H) = updateXYZ(atomic_numbers,
             atomic_positions,
             update_gradient,
+            (n, m),
             H,
+            I,
             calc_solvent=calc_solvent,
-            solvent=solvent)
-        xyz_history.append(atomic_positions)
-        energy_history.append(update_energy)
-        grad_history.append(update_gradient)
+            solvent=solvent,
+            scalar=scalar)
+        for history_key, value in zip(history_keys,
+            [atomic_positions, update_energy, update_gradient]):
+            history[history_key].append(value)
         # Check Convergence Criteria
-        if iter > 1 and isConverged(xyz_history, energy_history, grad_history, criteria=criteria):
-            print(f"Finished calculation after {iter+1} iterations with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
+        if i > 2 and isConverged(history, criteria=criteria):
+            if verbose:
+                print(f"Finished calculation after {i} iterations with final energy (kcal/mol): {history['energy'][-1]: .1f}")
             break
-        if iter == max_optimize_iterations-1:
-            print(f"Maximum iterations ({iter+1}) reached for vacuum calculation. Ending with final energy (kcal/mol): {energy_history[-1]: .1f}") if verbose is True else ''
         scalar *= learning
+    else:
+        if verbose:
+            print(f"Maximum iterations ({i}) reached for vacuum calculation. Ending with final energy (kcal/mol): {history['energy'][-1]: .1f}")
     # end timer
     end_time = timeit.default_timer()
-    print(f"Total Time: {end_time-start_time: .0f}s") if verbose is True else ''
-    
+    if verbose:
+        print(f"Total Time: {end_time - start_time: .3f} s")
     # Plotting for Debugging
     if plot:
         fig, ax = plt.subplots()
-        ax.plot(np.arange(0,len(energy_history)-1), energy_history[1:], label="Vacuum Energy")
+        ax.plot(np.arange(0,len(history['energy'])-1),
+            history['energy'][1:],
+            label="Vacuum Energy")
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Energy (Hartree)")
         ax.legend()
         # plt.savefig(f"images/energy_convergence-{' '.join(atomic_symbols)}-{identifier}-{'solvent' if calc_solvent else 'vacuum'}.jpg")
-        
-    return xyz_history[-1], energy_history[-1]
-
+    return history['xyz'][-1], history['energy'][-1]
 
 # Reference Molecule Properties in Solvent (Andrew)
 get_solvent_reference_properties = lambda smiles: geomOpt(*rdkitmolToXTBInputs(smilesToMol(smiles)), solvent=True, verbose=False, max_optimize_iterations=200)
@@ -208,7 +240,7 @@ def getPerturbedPositions(atomic_positions, perturb_magnitude):
     return perturbation_matrix+atomic_positions
 
 # Final Method (Andrew)
-def smiles_to_properties(smiles, criteria='Tight', verbose=True, plot=True):
+def smiles_to_properties(smiles, criteria='TIGHTOPT', verbose=True, plot=True):
     print("Performing Calculation. Please Wait.")
     # timer
     start_time = timeit.default_timer()
