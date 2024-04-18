@@ -7,11 +7,12 @@ sys.path.append(path.abspath(path.join(os.getcwd(), '../../')))
 from src.methods import geomOpt
 import numpy as np
 from xtb.utils import Solvent
+import scipy.constants
 
 CASES_DIR = 'cases'
+BOHR_RADIUS = scipy.constants.physical_constants['Bohr radius'][0] * 1e10
 
 def test_geomOpt():
-    CASES_DIR = 'cases'
     for case in os.listdir(CASES_DIR):
         if not case.startswith('.'):
             input_file = open(path.join(CASES_DIR, case, 'input.txt'), 'r')
@@ -43,6 +44,7 @@ def test_geomOpt():
                 solvent=solvent_input,
                 plot=plot_input,
                 verbose=verbose_input)
-            print(geomOpt_output)
+            output_file = open(path.join(CASES_DIR, case, 'output.txt'), 'w')
+            output_file.write(str(geomOpt_output))
 
 test_geomOpt()

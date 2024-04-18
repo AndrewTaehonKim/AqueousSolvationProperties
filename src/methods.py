@@ -123,20 +123,20 @@ def isConverged(history,
                     history['energy'][-2],
                     atol=TolE),
                 np.mean(sum_square) < TolRMSG_square]))
-        
+
 # Optimization Method (Andrew)
 def geomOpt(atomic_numbers,
     atomic_symbols,
     atomic_positions,
     criteria='TIGHTOPT',
     identifier='',
-    max_optimize_iterations=100,
+    max_optimize_iterations=1100,
     calc_solvent=False,
     solvent=Solvent.h2o,
     plot=False,
     verbose=True,
-    scalar=0.5,
-    learning=0.97):
+    scalar=0.2,
+    learning=0.998):
     history_keys = ['xyz', 'energy', 'grad']
     history = {history_key: [] for history_key in history_keys}
     # start timer
@@ -169,7 +169,7 @@ def geomOpt(atomic_numbers,
             [atomic_positions, update_energy, update_gradient]):
             history[history_key].append(value)
         # Check Convergence Criteria
-        if i > 2 and isConverged(history, criteria=criteria):
+        if i > 1 and isConverged(history, criteria=criteria):
             if verbose:
                 print(f"Finished calculation after {i} iterations with final energy (kcal/mol): {history['energy'][-1]: .1f}")
             break
