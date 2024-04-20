@@ -13,28 +13,28 @@ BOHR_RADIUS = scipy.constants.physical_constants['Bohr radius'][0] * 1e10
 
 class Molecule:
     def __init__(self, smiles):
-        mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles))
-        AllChem.EmbedMolecule(mol, AllChem.ETKDG())
-        AllChem.MMFFOptimizeMolecule(mol)
-        conformer = mol.GetConformer()
+        self.mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles))
+        AllChem.EmbedMolecule(self.mol, AllChem.ETKDG())
+        AllChem.MMFFOptimizeMolecule(self.mol)
+        conformer = self.mol.GetConformer()
         self.atomic_numbers = []
         self.elements = []
-        for atom in mol.GetAtoms():
+        for atom in self.mol.GetAtoms():
             self.atomic_numbers.append(atom.GetAtomicNum())
             self.elements.append(atom.GetSymbol())
         self.atomic_numbers = np.array(self.atomic_numbers)
         self.xyz = np.array([conformer.GetAtomPosition(i)
-            for i in range(mol.GetNumAtoms())])
+            for i in range(self.mol.GetNumAtoms())])
         self.singlepoint = collections.defaultdict(
             lambda: collections.deque(maxlen=2))
 
-    def optimizeGeometry(self, solvent, scalar=1, max_iterations=1000):
+    def minimizeEnergy(self, solvent, scalar=1, max_iterations=1000):
         self.appendSinglepoint(solvent)
-        while not self.isOptimized(solvent) and max_iterations > 0:
+        while not self.energyMinimized(solvent) and max_iterations > 0:
             self.xyz -= scalar * self.singlepoint[solvent][-1].get_gradient()
             self.appendSinglepoint(solvent)
             max_iterations -= 1
-        return int(self.isOptimized(solvent) ^ True)
+        return int(self.energyMinimized(solvent) ^ True)
 
     def appendSinglepoint(self, solvent):
         calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
@@ -44,7 +44,7 @@ class Molecule:
         calculator.set_verbosity(xtb.libxtb.VERBOSITY_MUTED)
         self.singlepoint[solvent].append(calculator.singlepoint())
 
-    def isOptimized(self, solvent):
+    def energyMinimized(self, solvent):
         return len(self.singlepoint[solvent]) > 1 and np.isclose(
             self.getEnergy(solvent, i=0),
             self.getEnergy(solvent, i=1))
@@ -55,7 +55,7 @@ class Molecule:
     def formationEnergy(self, iterations=10):
         formation_energy_list = []
         for i in range(iterations):
-            self.optimizeGeometry(xtb.utils.Solvent.h2o)
+            self.minimizeEnergy(xtb.utils.Solvent.h2o)
             formation_energy = self.getEnergy(xtb.utils.Solvent.h2o)
             for element, num_atoms in collections.Counter(
                 self.elements).items():
@@ -90,12 +90,14 @@ def dumpReferenceStates(iterations=100):
         energy = []
         for _ in range(iterations):
             molecule = Molecule(smiles)
-            molecule.optimizeGeometry(solvent)
+            molecule.minimizeEnergy(solvent)
             energy.append(molecule.getEnergy(solvent))
         # TODO: Verify that energy is normally distributed
         reference_states[element]['energy'] = np.mean(energy)
         reference_states[element]['stddev'] = np.std(energy)
     json.dump(reference_states, open(REFERENCE_STATES_FILEPATH, 'w'))
 
+
+loadReferenceStates = lambda: json.load(open(REFERENCE_STATES_FILEPATH, 'r'))
 # dumpReferenceStates()
-reference_states = json.load(open(REFERENCE_STATES_FILEPATH, 'r'))
+# reference_states = loadReferenceStates()
