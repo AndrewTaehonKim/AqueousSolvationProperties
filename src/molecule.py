@@ -52,7 +52,7 @@ class Molecule:
     def getEnergy(self, solvent, i=-1):
         return self.singlepoint[solvent][i].get_energy()
 
-    def formationEnergy(self, iterations=10):
+    def formationEnergy(self, reference_states, iterations=10):
         formation_energy_list = []
         for i in range(iterations):
             self.minimizeEnergy(xtb.utils.Solvent.h2o)
@@ -98,6 +98,7 @@ def dumpReferenceStates(iterations=100):
     json.dump(reference_states, open(REFERENCE_STATES_FILEPATH, 'w'))
 
 
-loadReferenceStates = lambda: json.load(open(REFERENCE_STATES_FILEPATH, 'r'))
+loadReferenceStates = lambda REFERENCE_STATES_FILEPATH: json.load(
+    open(REFERENCE_STATES_FILEPATH, 'r'))
 # dumpReferenceStates()
 # reference_states = loadReferenceStates()
