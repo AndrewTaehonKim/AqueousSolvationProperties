@@ -67,6 +67,12 @@ class Molecule:
         formation_energy_list = np.array(formation_energy_list)
         return np.mean(formation_energy_list), np.std(formation_energy_list)
 
+    generateFp = lambda self: np.array(rdkit
+        .Chem
+        .rdFingerprintGenerator
+        .GetRDKitFPGenerator(fpSize=512)
+        .GetFingerprint(self.mol), dtype=np.intc)
+
 def dumpReferenceStates(iterations=100):
     solvent = xtb.utils.Solvent.h2o
     reference_states = collections.defaultdict(lambda: dict())
@@ -100,5 +106,6 @@ def dumpReferenceStates(iterations=100):
 
 loadReferenceStates = lambda REFERENCE_STATES_FILEPATH: json.load(
     open(REFERENCE_STATES_FILEPATH, 'r'))
+
 # dumpReferenceStates()
-# reference_states = loadReferenceStates()
+# reference_states = loadReferenceStates(REFERENCE_STATES_FILEPATH)
