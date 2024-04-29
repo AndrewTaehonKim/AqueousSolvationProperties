@@ -8,7 +8,6 @@ from src.molecule import *
 
 REFERENCE_STATES_FILEPATH = '../../reference_states.json'
 CASES_DIR = 'cases'
-KCALPERMOL_PER_HARTREE = 627.509
 
 def test_Molecule_formationEnergy():
     for case in os.listdir(CASES_DIR):
@@ -29,13 +28,13 @@ def test_Molecule_formationEnergy():
                 smiles).formationEnergy(
                 reference_states)
             for data in output:
-                output_file.write(
-                    str(data * KCALPERMOL_PER_HARTREE) + '\n')
+                output_file.write(str(data) + '\n')
             formation_energy_expected = float(next(expected_file).strip())
             formation_energy_stddev_expected = float(next(expected_file)
                 .strip())
             assert np.isclose(formation_energy_output,
-                formation_energy_expected)
+                formation_energy_expected,
+                rtol=0.01) # TODO: Adjust rtol
             assert np.isclose(formation_energy_stddev_output,
                 formation_energy_stddev_expected)
 

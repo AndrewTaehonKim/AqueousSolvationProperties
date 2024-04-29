@@ -24,27 +24,17 @@ class Molecule:
         self.atomic_numbers = np.array(self.atomic_numbers)
         self.singlepoint = collections.defaultdict(
             lambda: collections.deque(maxlen=2))
+        self.n = len(self.atomic_numbers)
+        self.calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
+            self.atomic_numbers,
+            np.reshape(self.xyz, (self.n, 3)))
 
     def preOptimize(self):
-        AllChem.EmbedMolecule(self.mol, AllChem.ETKDG())
-        AllChem.MMFFOptimizeMolecule(self.mol)
+        AllChem.EmbedMolecule(self.mol)
+        AllChem.MMFFOptimizeMolecule(self.mol, maxIters=400)
         conformer = self.mol.GetConformer()
         self.xyz = np.array([conformer
             .GetAtomPosition(i) for i in range(self.mol.GetNumAtoms())])
-
-    def minimizeEnergy(self,
-        solvent=None,
-        scalar=1,
-        max_iterations=1000,
-        randomize=False):
-        if randomize:
-            self.preOptimize()
-        self.appendSinglepoint(solvent)
-        while not self.energyMinimized(solvent) and max_iterations > 0:
-            self.xyz -= scalar * self.singlepoint[solvent][-1].get_gradient()
-            self.appendSinglepoint(solvent)
-            max_iterations -= 1
-        return int(self.energyMinimized(solvent) ^ True)
 
     def appendSinglepoint(self, solvent=None):
         calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
@@ -54,19 +44,33 @@ class Molecule:
         calculator.set_verbosity(xtb.libxtb.VERBOSITY_MUTED)
         self.singlepoint[solvent].append(calculator.singlepoint())
 
+    def minimizeEnergy(self, solvent=None, randomize=False):
+        if randomize:
+            self.preOptimize()
+        start = timeit.default_timer()
+        solution = scipy.optimize.minimize(self.getEnergy,
+            self.xyz.flatten(),
+            method='L-BFGS-B')
+        return 1 - solution.success
+
+    def getEnergy(self, xyz, solvent=None):
+        calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
+            self.atomic_numbers,
+            xyz)
+        calculator.set_solvent(solvent)
+        calculator.set_verbosity(xtb.libxtb.VERBOSITY_MUTED)
+        return calculator.singlepoint().get_energy()
+
     def energyMinimized(self, solvent=None):
         return len(self.singlepoint[solvent]) > 1 and np.isclose(
             self.getEnergy(solvent, i=0),
             self.getEnergy(solvent, i=1))
 
-    def getEnergy(self, solvent=None, i=-1):
-        return self.singlepoint[solvent][i].get_energy()
-
     def formationEnergy(self, reference_states, iterations=10):
         formation_energy_list = []
         for i in range(iterations):
             # TODO: Pre-optimize
-            self.minimizeEnergy(xtb.utils.Solvent.h2o)
+            self.minimizeEnergy(xtb.utils.Solvent.h2o, randomize=True)
             formation_energy = self.getEnergy(xtb.utils.Solvent.h2o)
             for element, num_atoms in collections.Counter(
                 self.elements).items():
@@ -83,9 +87,9 @@ class Molecule:
         solvent = xtb.utils.Solvent.h2o
         hydration_energy_list = []
         for i in range(iterations):
-            self.minimizeEnergy(solvent=solvent)
+            self.minimizeEnergy(solvent=solvent, randomize=True)
             solvent_energy = self.getEnergy(solvent=solvent)
-            self.minimizeEnergy()
+            self.minimizeEnergy(randomize=True)
             vacuum_energy = self.getEnergy()
             hydration_energy_list.append(solvent_energy - vacuum_energy)
         hydration_energy_list = np.array(
