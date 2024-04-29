@@ -12,9 +12,17 @@ REFERENCE_STATES_FILEPATH = '../reference_states.json'
 KCALPERMOL_PER_HARTREE = 627.509
 BOHR_RADIUS = scipy.constants.physical_constants['Bohr radius'][0] * 1e10
 
+# Molecule class to hold all the properties based on SMILE input
 class Molecule:
+    # initialize molecule
     def __init__(self, smiles):
-        self.mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles))
+        try: # in case smile inputed is not usable
+            self.mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles)) # add H atoms to a rdkit.
+        except Exception as e:
+            print(f"Failed to create molecule from SMILES string: {smiles}")
+            print(f"Error: {e}")
+            self.mol = None
+            return
         self.preOptimize()
         self.atomic_numbers = []
         self.elements = []
