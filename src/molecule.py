@@ -13,11 +13,9 @@ REFERENCE_STATES_FILEPATH = '../reference_states.json'
 KCALPERMOL_PER_HARTREE = 627.509
 BOHR_RADIUS = scipy.constants.physical_constants['Bohr radius'][0] * 1e10
 
-# Molecule class to hold all the properties based on SMILE input
 class Molecule:
-    # initialize molecule
+    # initialize molecule (Lareine & Andrew)
     def __init__(self, smiles):
-        self.start = timeit.default_timer() # start timer
         try: # in case smile inputed is not usable
             self.mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles)) # add H atoms to a rdkit.
         except Exception as e:
@@ -25,7 +23,9 @@ class Molecule:
             print(f"Error: {e}")
             self.mol = None
             return 0
+        self.smiles = smiles
         self.n = self.mol.GetNumAtoms() # number of atoms in the molecule
+        self.min_energy=0
         self.preOptimize() # optimize using basic force field
         # make input variables for xtb
         self.atomic_numbers = []
@@ -34,126 +34,93 @@ class Molecule:
             self.atomic_numbers.append(atom.GetAtomicNum())
             self.elements.append(atom.GetSymbol())
         self.atomic_numbers = np.array(self.atomic_numbers)
-        # set up dictionary to collect single point energies
-        self.singlepoint = collections.defaultdict(
-            lambda: collections.deque(maxlen=2))
-        # initialize xtb calculator
-        self.calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
-            self.atomic_numbers,
-            np.reshape(self.xyz, (self.n, 3)))
+        self.params = [xtb.interface.Param.GFN0xTB,
+            xtb.interface.Param.GFN1xTB,
+            xtb.interface.Param.GFN2xTB]
+        self.param_index = 2
 
-    # preoptimzation method using rdkit's built in embed molecule and force field
-    def preOptimize(self):
+    # pre-optimization method using rdkit's built in embed molecule and force field (Lareine)
+    def preOptimize(self, force_field=True):
         AllChem.EmbedMolecule(self.mol)
-        AllChem.MMFFOptimizeMolecule(self.mol, maxIters=400)
+        if force_field is True:
+            AllChem.MMFFOptimizeMolecule(self.mol, maxIters=400)
         conformer = self.mol.GetConformer()
         self.xyz = np.array([conformer.GetAtomPosition(i) for i in range(self.n)])
 
-    # method to add single point energy calculation to the end of the deque
-    def appendSinglepoint(self, solvent=None):
-        calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
-            self.atomic_numbers,
-            self.xyz) # initialize calculator
-        calculator.set_solvent(solvent) # set solvent
-        calculator.set_verbosity(xtb.libxtb.VERBOSITY_MUTED) # set verbosity
-        self.singlepoint[solvent].append(calculator.singlepoint()) # calculate and append
-
-    # use scipy L-BFGS to optimize energy
-    def minimizeEnergy(self, solvent=None, randomize=False):
-        if randomize:
-            self.preOptimize() # reinitializes initial xyz
-        start = timeit.default_timer()
-        # Convergence Criteria based on ORCA 4.2.1. convergence criteria https://www.afs.enea.it/software/orca/orca_manual_4_2_1.pdf page 19
-        
+    def minimizeEnergy(self, method='BFGS'):
+        # TODO: Use gradient to speed up
         solution = scipy.optimize.minimize(self.getEnergy,
             self.xyz.flatten(),
-            args=(solvent,),
-            method='L-BFGS-B') 
-        self.xyz = solution.x.reshape(self.xyz.shape)
-        self.min_energy = solution.fun
+            method=method)
+        while self.param_index < 2:
+            self.param_index += 1
+            solution = scipy.optimize.minimize(self.getEnergy,
+                self.xyz.flatten(),
+                method=method)
         return 1 - solution.success
-    
-    # the method that scipy.optimize.minimize will try to minimize (used above)
-    def getEnergy(self, xyz, solvent=None):
-        xyz = xyz.reshape(self.xyz.shape)
-        calculator = xtb.interface.Calculator(xtb.interface.Param.GFN2xTB,
+
+    def getEnergy(self, xyz):
+        xyz = xyz.reshape(self.n, 3)
+        calculator = xtb.interface.Calculator(self.params[self.param_index],
             self.atomic_numbers,
             xyz)
-        calculator.set_solvent(solvent)
         calculator.set_verbosity(xtb.libxtb.VERBOSITY_MUTED)
-        return calculator.singlepoint().get_energy()
+        try:
+            energy = calculator.singlepoint().get_energy()
+            self.xyz = xyz
+            return energy
+        except xtb.interface.XTBException:
+            if self.param_index > 0:
+                self.param_index -= 1
+                return self.getEnergy(xyz)
+            else:
+                raise xtb.interface.XTBException
 
-    # convergence criteria
-    def energyMinimized(self, solvent=None):
-        return len(self.singlepoint[solvent]) > 1 and np.isclose(
-            self.getEnergy(solvent, i=0),
-            self.getEnergy(solvent, i=1))
-
-    # calculate energy of solvation and subtract with reference energies. 
-    # reference_states obtained from JSON
-    def formationEnergy(self, reference_states, iterations=10):
+    # calculate energy of solvation and subtract with reference energies (from JSON). (Lareine & Andrew)
+    def getFormationEnergy(self, reference_states=json.load(open(REFERENCE_STATES_FILEPATH, 'r')), solvent=xtb.utils.Solvent.h2o, iterations=10):
         formation_energy_list = []
         for i in range(iterations): # sensitivity analysis
-            # optimize geometry in solution
-            self.minimizeEnergy(xtb.utils.Solvent.h2o, randomize=True)
+            # optimize geometry in solution multiple times
+            self.minimizeEnergy(solvent, randomize=True)
             formation_energy = self.min_energy
-            # compare with reference states by looping over each element 
+            # compare with reference states by looping over each element
             for element, num_atoms in collections.Counter(
                 self.elements).items():
                 formation_energy -= num_atoms/2 * reference_states[element]['energy']
                 # example H2O is comprised of 2H + 1O -> energy -> E_H2 + 1/2 E_O2
             formation_energy_list.append(formation_energy)
-        formation_energy_list = np.array(formation_energy_list) * KCALPERMOL_PER_HARTREE 
-        return np.mean(formation_energy_list), np.std(formation_energy_list)
-    
-    # calculate hydration energy by subtracting aqueous with vacuum 
-    def hydrationEnergy(self, iterations=10):
+        formation_energy_list = np.array(formation_energy_list) * KCALPERMOL_PER_HARTREE
+        self.formationEnergy, self.formationEnergySTD = np.mean(formation_energy_list), np.std(formation_energy_list)
+        return self.formationEnergy, self.formationEnergySTD
+
+    # calculate hydration energy by subtracting aqueous with vacuum (Andrew & Lareine)
+    def getHydrationEnergy(self, iterations=10):
         solvent = xtb.utils.Solvent.h2o
         hydration_energy_list = []
-        for i in range(iterations):
-            self.minimizeEnergy(solvent=solvent, randomize=True)
-            solvent_energy = self.getEnergy(solvent=solvent)
-            self.minimizeEnergy(randomize=True)
-            vacuum_energy = self.getEnergy()
-            hydration_energy_list.append(solvent_energy - vacuum_energy)
-        hydration_energy_list = np.array(
-            hydration_energy_list) * KCALPERMOL_PER_HARTREE
-        return np.mean(hydration_energy_list), np.std(hydration_energy_list)
+        self.solvFormationEnergy, self.solvFormationEnergySTD = self.formationEnergy, self.formationEnergySTD
+        self.vacFormationEnergy, self.vacFormationEnergySTD = self.getFormationEnergy(solvent=None)
+        """ # for different calculation method for error => get upper and lower E_hydration by taking max solvent - min vacuum & min solvent - max vacuum
+        # max_hydration = (self.solvFormationEnergy+self.solvFormationEnergySTD)-(self.vacFormationEnergy-self.vacFormationEnergySTD)
+        # min_hydration = (self.solvFormationEnergy-self.solvFormationEnergySTD)-(self.vacFormationEnergy+self.vacFormationEnergySTD)
+        # self.hydrationEnergy = (max_hydration+min_hydration)/2
+        # self.hydrationEnergySTD = max_hydration-self.hydrationEnergy
+        """
+        self.hydrationEnergy = self.solvFormationEnergy - self.vacFormationEnergy
+        self.hydrationEnergySTD = np.sqrt(self.solvFormationEnergySTD**2+self.vacFormationEnergySTD**2)
+        return self.hydrationEnergy, self.hydrationEnergySTD
 
-    # generate the fingerprint
-    generateFp = lambda self: np.array(rdkit
-        .Chem
-        .rdFingerprintGenerator
-        .GetRDKitFPGenerator(fpSize=512)
-        .GetFingerprint(self.mol), dtype=np.intc)
+    # generate the fingerprint (Lareine)
+    def generateFp(self):
+      self.RDKFingerprint = np.array(rdkit.Chem.rdFingerprintGenerator
+                      .GetRDKitFPGenerator(fpSize=512)
+                      .GetFingerprint(self.mol), dtype=np.intc)
+      return self.RDKFingerprint
 
-def dumpReferenceStates(iterations=10   ):
-    # TODO: Verify accuracy of reference states
-    solvent = xtb.utils.Solvent.h2o
-    reference_states = collections.defaultdict(lambda: dict())
-    for element, smiles in zip(
-        ['H','C','N','O','F','P','S','Cl'], 
-        ['[H][H]',
-        '[C-]#[C+]', # UFFTYPER: Unrecognized atom type: C_ (1)
-        'N#N',
-        'O=O',
-        'FF',
-        'P#P', # UFFTYPER: Warning: hybridization set to SP3 for atom 0
-        # UFFTYPER: Warning: hybridization set to SP3 for atom 1
-        'S=S',
-        'ClCl']):
-        reference_states[element]['smiles'] = smiles
-        energy = []
-        for _ in range(iterations):
-            molecule = Molecule(smiles) # creates a molecule for the reference
-            molecule.minimizeEnergy(solvent)
-            energy.append(molecule.getEnergy(molecule.xyz, solvent))
-        # TODO: Verify that energy is normally distributed
-        reference_states[element]['energy'] = np.mean(energy)
-        reference_states[element]['stddev'] = np.std(energy)
-    json.dump(reference_states, open(REFERENCE_STATES_FILEPATH, 'w'))
-
-loadReferenceStates = lambda filepath: json.load(open(filepath, 'r'))
-
-# dumpReferenceStates()
-# reference_states = loadReferenceStates(REFERENCE_STATES_FILEPATH)
+    # print properties of the molecule (Andrew)
+    def printProperties(self):
+      print(f"SMILES: {self.smiles}")
+      print(f"Elements: {self.elements}")
+      print(f"xyz coordinates (Angstroms): \n {np.array2string(np.round(self.xyz*ANGSTROM_PER_AU,1))}")
+      print(f"Formation Energy vs. Reference: {self.solvFormationEnergy: .1f} +- {self.solvFormationEnergySTD: .1} kcal/mol")
+      print(f"Hydration Energy:  {self.hydrationEnergy: .2f} +- {self.hydrationEnergySTD: .1} kcal/mol")
+      print(f"RDKFingerprint (512 bits): \n {np.array2string(self.RDKFingerprint)}")
