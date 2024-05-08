@@ -1,4 +1,6 @@
 import collections
+import concurrent.futures
+import copy
 import json
 import numpy as np
 import rdkit.Chem
@@ -9,9 +11,12 @@ import xtb.interface
 import xtb.libxtb
 import xtb.utils
 
-loadReferenceStates = lambda REFERENCE_STATES_FILEPATH: json.load(open(REFERENCE_STATES_FILEPATH, 'r'))
+import timeit
 
-REFERENCE_STATES_FILEPATH = '../reference_states.json'
+loadReferenceStates = lambda REFERENCE_STATES_FILEPATH: json.load(open(REFERENCE_STATES_FILEPATH,
+    'r'))
+
+REFERENCE_STATES_FILEPATH = '../reference-states.json'
 KCALPERMOL_PER_HARTREE = 627.509
 ANGSTROM_PER_BOHR = scipy.constants.physical_constants['Bohr radius'][0] / scipy.constants.angstrom
 reference_states = loadReferenceStates(REFERENCE_STATES_FILEPATH)
@@ -21,7 +26,6 @@ class Molecule:
     def __init__(self, smiles):
         self.mol = rdkit.Chem.AddHs(rdkit.Chem.MolFromSmiles(smiles)) # add H atoms to a rdkit.
         self.n = self.mol.GetNumAtoms() # number of atoms in the molecule
-        self.min_energy = float('inf')
         # make input variables for xtb
         self.atomic_numbers = []
         self.elements = []
@@ -33,9 +37,12 @@ class Molecule:
 
     # use scipy L-BFGS to optimize energy (Andrew & Lareine)
     def minimizeEnergy(self, solvent=None):
-        AllChem.EmbedMolecule(self.mol)
-        AllChem.MMFFOptimizeMolecule(self.mol, maxIters=400)
-        conformer = self.mol.GetConformer()
+        j = np.random.randint(100)
+        print('running minimize energy', j)
+        mol = copy.deepcopy(self.mol)
+        AllChem.EmbedMolecule(mol)
+        AllChem.MMFFOptimizeMolecule(mol, maxIters=400)
+        conformer = mol.GetConformer()
         solution = scipy.optimize.minimize(self.getEnergyGradient,
             np.array([conformer.GetAtomPosition(i) for i in range(self.n)])
                 .flatten() / ANGSTROM_PER_BOHR,
@@ -46,6 +53,7 @@ class Molecule:
             # Tight convergence criteria page 19(51) & 605(634) => https://www.afs.enea.it/software/orca/orca_manual_4_2_1.pdf
             options = {'gtol': 3e-3,'maxiter': 3 * self.n},)
         # print(f"Optimization Runtime: {end - start} seconds after {solution.nit} iterations")
+        print('ending minimize energy', j)
         return solution.x.reshape((self.n, 3)) * ANGSTROM_PER_BOHR, solution.fun
 
     # the method that scipy.optimize.minimize will try to minimize (used above) (Andrew & Lareine)
@@ -61,18 +69,20 @@ class Molecule:
     # calculate energy of solvation and subtract with reference energies (from JSON). (Lareine & Andrew)
     def getFormationEnergy(self,
         solvent=xtb.utils.Solvent.h2o,
-        reference_states=reference_states,
         iters=10):
-        # TODO: Accommodate for non-Gaussian distributions of reference states
         # TODO: Speed up
-        self.formation_energy[solvent] = np.array([self.minimizeEnergy(solvent)[1]
-            - sum(num_atoms // 2 * np.random.normal(reference_states[element]['energy'],
-                reference_states[element]['stddev'])
-            for element, num_atoms in collections.Counter(self.elements).items())
-            for _ in range(iters)]) * KCALPERMOL_PER_HARTREE
-            # compare with reference states by looping over each element
-            # example H2O is comprised of 2H + 1O -> energy -> E_H2 + 1/2 E_O2
+        counter = collections.Counter(self.elements)
+        for element in counter:
+            counter[element] //= 2
+        thread_pool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        self.formation_energy[solvent] = np.array([thread_pool_executor
+            .submit(lambda: self
+                .minimizeEnergy(solvent)[1] - sum(sum(np.random.choice(reference_states[element],
+                    size=num_atoms,
+                    replace=True)) for element, num_atoms in counter.items()))
+            .result() for _ in range(iters)]) * KCALPERMOL_PER_HARTREE
         return np.mean(self.formation_energy[solvent]), np.std(self.formation_energy[solvent])
+
 
     # calculate hydration energy by subtracting aqueous with vacuum (Andrew & Lareine)
     def getHydrationEnergy(self):
@@ -100,3 +110,15 @@ def smiles_to_properties(SMILES):
         mol.getFormationEnergy(),
         mol.getHydrationEnergy(),
         mol.generateFp())
+
+# SMILES = 'CC'
+SMILES = "CC(C)(C)[C@H](NC(=O)C(F)(F)F)C(=O)N1C[C@H]2[C@@H]([C@H]1C(=O)N[C@H](C#N)C[C@@H]1CCNC1=O)C2(C)C"
+start = timeit.default_timer()
+molecule = Molecule(SMILES)
+output = smiles_to_properties(SMILES)
+end = timeit.default_timer()
+print(output)
+print('Elapsed time:', end - start)
+
+# 2 iterations: 24 seconds
+# 10 iterations: 120 seconds
